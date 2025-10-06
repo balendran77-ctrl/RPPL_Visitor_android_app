@@ -1,6 +1,7 @@
 
 require('dotenv').config();
 const express = require('express');
+console.log('Backend server started. Waiting for requests...');
 const mongoose = require('mongoose');
 const cors = require('cors');
 
@@ -220,6 +221,40 @@ app.post('/api/visitor/in', authMiddleware, async (req, res) => {
     status: 'IN'
   });
   await inoutData.save();
+
+  // Send email to rpplhr@bharathpackagings.com with visitor details
+  const nodemailer = require('nodemailer');
+  // Configure transporter (use your SMTP details or Gmail for demo)
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER, // set in .env
+      pass: process.env.EMAIL_PASS  // set in .env
+    }
+  });
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: 'rpplhr@bharathpackagings.com',
+    subject: `New Visitor IN: ${visitorName} (${phoneNo})`,
+    text:
+      `Visitor Name: ${visitorName}\n` +
+      `Phone No: ${phoneNo}\n` +
+      `ID Proof: ${idProof}\n` +
+      `Company: ${company}\n` +
+      `Address: ${address}\n` +
+      `Purpose: ${purpose}\n` +
+      `Person to Meet: ${personToMeet}\n` +
+      `Visitor Pass No: ${visitorPassNo}\n` +
+      `IN Time: ${inoutData.inTime.toLocaleString()}\n`
+  };
+  transporter.sendMail(mailOptions, (error, info) => {
+    if (error) {
+      console.error('Error sending email:', error);
+    } else {
+      console.log('Email sent:', info.response);
+    }
+  });
+
   res.json({ message: 'Visitor IN recorded', visitor, inoutData });
 });
 
@@ -244,6 +279,42 @@ app.post('/api/visitor/out', authMiddleware, async (req, res) => {
     inoutData.outTime = new Date();
     inoutData.status = 'OUT';
     await inoutData.save();
+
+    // Fetch visitor details for email
+    const visitor = await Visitor.findOne({ phoneNo: inoutData.phoneNo });
+    // Send email to rpplhr@bharathpackagings.com with OUT details
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      }
+    });
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: 'rpplhr@bharathpackagings.com',
+      subject: `Visitor Marked OUT: ${visitor ? visitor.visitorName : ''} (${inoutData.phoneNo})`,
+      text:
+        `Visitor Name: ${visitor ? visitor.visitorName : ''}\n` +
+        `Phone No: ${inoutData.phoneNo}\n` +
+        `ID Proof: ${visitor ? visitor.idProof : ''}\n` +
+        `Company: ${visitor ? visitor.company : ''}\n` +
+        `Address: ${visitor ? visitor.address : ''}\n` +
+        `Purpose: ${inoutData.purpose}\n` +
+        `Person to Meet: ${inoutData.personToMeet}\n` +
+        `Visitor Pass No: ${inoutData.visitorPassNo}\n` +
+        `IN Time: ${inoutData.inTime ? inoutData.inTime.toLocaleString() : ''}\n` +
+        `OUT Time: ${inoutData.outTime ? inoutData.outTime.toLocaleString() : ''}\n`
+    };
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.error('Error sending OUT email:', error);
+      } else {
+        console.log('OUT Email sent:', info.response);
+      }
+    });
+
     res.json({ message: 'Visitor OUT recorded', inoutData });
   } catch (err) {
     res.status(500).json({ message: 'Error marking OUT', error: err.message, debug: { inoutId } });
