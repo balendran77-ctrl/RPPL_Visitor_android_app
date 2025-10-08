@@ -225,6 +225,35 @@ app.post('/api/visitor/in', authMiddleware, async (req, res) => {
   // Send email to rpplhr@bharathpackagings.com with visitor details
   try {
     const nodemailer = require('nodemailer');
+    // If SENDGRID_API_KEY is provided, prefer SendGrid Web API (more reliable on some hosts)
+    if (process.env.SENDGRID_API_KEY) {
+      try {
+        const sgMail = require('@sendgrid/mail');
+        sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+        const fromEmail = process.env.EMAIL_USER || (process.env.SENDGRID_FROM || 'no-reply@example.com');
+        const msg = {
+          to: 'rpplhr@bharathpackagings.com',
+          from: fromEmail,
+          subject: `New Visitor IN: ${visitorName} (${phoneNo})`,
+          text:
+            `Visitor Name: ${visitorName}\n` +
+            `Phone No: ${phoneNo}\n` +
+            `ID Proof: ${idProof}\n` +
+            `Company: ${company}\n` +
+            `Address: ${address}\n` +
+            `Purpose: ${purpose}\n` +
+            `Person to Meet: ${personToMeet}\n` +
+            `Visitor Pass No: ${visitorPassNo}\n` +
+            `IN Time: ${inoutData.inTime.toLocaleString()}\n`
+        };
+        const sgRes = await sgMail.send(msg);
+        console.log('SendGrid IN email sent:', sgRes && sgRes[0] && sgRes[0].statusCode);
+        return res.json({ message: 'Visitor IN recorded', visitor, inoutData, emailSent: true, emailInfo: { provider: 'sendgrid', statusCode: sgRes[0].statusCode } });
+      } catch (sgErr) {
+        console.error('SendGrid IN email error:', sgErr);
+        // fall through to SMTP fallback
+      }
+    }
     // Build transporter from environment variables. Prefer explicit SMTP settings if provided.
     const smtpHost = process.env.SMTP_HOST;
     const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : undefined;
@@ -313,6 +342,36 @@ app.post('/api/visitor/out', authMiddleware, async (req, res) => {
     // Send email to rpplhr@bharathpackagings.com with OUT details
     try {
       const nodemailer = require('nodemailer');
+      // If SENDGRID_API_KEY is provided, prefer SendGrid Web API (more reliable on some hosts)
+      if (process.env.SENDGRID_API_KEY) {
+        try {
+          const sgMail = require('@sendgrid/mail');
+          sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+          const fromEmail = process.env.EMAIL_USER || (process.env.SENDGRID_FROM || 'no-reply@example.com');
+          const msg = {
+            to: 'rpplhr@bharathpackagings.com',
+            from: fromEmail,
+            subject: `Visitor Marked OUT: ${visitor ? visitor.visitorName : ''} (${inoutData.phoneNo})`,
+            text:
+              `Visitor Name: ${visitor ? visitor.visitorName : ''}\n` +
+              `Phone No: ${inoutData.phoneNo}\n` +
+              `ID Proof: ${visitor ? visitor.idProof : ''}\n` +
+              `Company: ${visitor ? visitor.company : ''}\n` +
+              `Address: ${visitor ? visitor.address : ''}\n` +
+              `Purpose: ${inoutData.purpose}\n` +
+              `Person to Meet: ${inoutData.personToMeet}\n` +
+              `Visitor Pass No: ${inoutData.visitorPassNo}\n` +
+              `IN Time: ${inoutData.inTime ? inoutData.inTime.toLocaleString() : ''}\n` +
+              `OUT Time: ${inoutData.outTime ? inoutData.outTime.toLocaleString() : ''}\n`
+          };
+          const sgRes = await sgMail.send(msg);
+          console.log('SendGrid OUT email sent:', sgRes && sgRes[0] && sgRes[0].statusCode);
+          return res.json({ message: 'Visitor OUT recorded', inoutData, emailSent: true, emailInfo: { provider: 'sendgrid', statusCode: sgRes[0].statusCode } });
+        } catch (sgErr) {
+          console.error('SendGrid OUT email error:', sgErr);
+          // fall through to SMTP fallback
+        }
+      }
       const smtpHost = process.env.SMTP_HOST;
       const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : undefined;
       const smtpSecure = process.env.SMTP_SECURE === 'true';
@@ -420,3 +479,46 @@ app.get('/api/visitor/search', authMiddleware, async (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// Test email endpoint (no auth) — useful for verifying email configuration
+app.post('/api/email/test', async (req, res) => {
+  const { to, subject, text } = req.body || {};
+  const recipient = to || 'rpplhr@bharathpackagings.com';
+  const subj = subject || `Test email from Factory Gate Backend - ${new Date().toISOString()}`;
+  const body = text || `This is a test email sent at ${new Date().toISOString()}`;
+  try {
+    // Prefer SendGrid Web API if available
+    if (process.env.SENDGRID_API_KEY) {
+      const sgMail = require('@sendgrid/mail');
+      sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+      const fromEmail = process.env.EMAIL_USER || process.env.SENDGRID_FROM || 'no-reply@example.com';
+      const msg = { to: recipient, from: fromEmail, subject: subj, text: body };
+      const sgRes = await sgMail.send(msg);
+      console.log('SendGrid test email sent:', sgRes && sgRes[0] && sgRes[0].statusCode);
+      return res.json({ emailSent: true, provider: 'sendgrid', statusCode: sgRes && sgRes[0] && sgRes[0].statusCode });
+    }
+
+    // Otherwise try SMTP using existing logic
+    const nodemailer = require('nodemailer');
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : undefined;
+    const smtpSecure = process.env.SMTP_SECURE === 'true';
+    const smtpUser = process.env.SMTP_USER || process.env.EMAIL_USER;
+    const smtpPass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
+
+    let transporter;
+    if (smtpHost && smtpPort && smtpUser && smtpPass) {
+      transporter = nodemailer.createTransport({ host: smtpHost, port: smtpPort, secure: smtpSecure || false, auth: { user: smtpUser, pass: smtpPass }, tls: { rejectUnauthorized: false }, connectionTimeout: 15000 });
+    } else {
+      transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }, connectionTimeout: 15000 });
+    }
+
+    const mailOptions = { from: smtpUser || process.env.EMAIL_USER, to: recipient, subject: subj, text: body };
+    const info = await transporter.sendMail(mailOptions);
+    console.log('SMTP test email sent:', info && info.response ? info.response : info);
+    return res.json({ emailSent: true, provider: 'smtp', info });
+  } catch (err) {
+    console.error('Error sending test email:', err);
+    return res.status(500).json({ emailSent: false, error: err.message });
+  }
+});
